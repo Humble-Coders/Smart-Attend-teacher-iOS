@@ -1,0 +1,352 @@
+import SwiftUI
+import Security
+import FirebaseCore
+import FirebaseFirestore
+
+
+struct ContentView: View {
+    @StateObject private var authManager = AuthManager()
+    
+    var body: some View {
+        Group {
+            if authManager.isLoggedIn {
+                HomeView()
+                    .environmentObject(authManager)
+            } else {
+                LoginView()
+                    .environmentObject(authManager)
+            }
+        }
+    }
+}
+
+// MARK: - Auth Manager
+class AuthManager: ObservableObject {
+    @Published var isLoggedIn = false
+    @Published var teacherData: TeacherData?
+    
+    private let keychain = KeychainManager()
+    
+    init() {
+        checkLoginStatus()
+    }
+    
+    func checkLoginStatus() {
+        if let data = keychain.getTeacherData() {
+            self.teacherData = data
+            self.isLoggedIn = true
+        }
+    }
+    
+    func login(teacherData: TeacherData) {
+        keychain.saveTeacherData(teacherData)
+        self.teacherData = teacherData
+        self.isLoggedIn = true
+    }
+    
+    func logout() {
+        keychain.deleteTeacherData()
+        self.teacherData = nil
+        self.isLoggedIn = false
+    }
+}
+
+// MARK: - Data Models
+struct TeacherData: Codable {
+    let name: String
+    let designation: String
+    let subjects: [String]
+    let classes: [String]
+}
+
+struct SessionData {
+    let classes: [String]
+    let subject: String
+    let room: String
+    let type: String // "lect", "lab", "tut"
+    let isExtra: Bool
+    let date: String
+    let sessionId: String
+    let isActive: Bool
+}
+
+// MARK: - Keychain Manager
+class KeychainManager: ObservableObject {
+    private let teacherDataKey = "TeacherData"
+    private let roomsKey = "CachedRooms"
+    
+    func saveTeacherData(_ data: TeacherData) {
+        let encoder = JSONEncoder()
+        if let encoded = try? encoder.encode(data) {
+            let query: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrAccount as String: teacherDataKey,
+                kSecValueData as String: encoded
+            ]
+            
+            SecItemDelete(query as CFDictionary)
+            SecItemAdd(query as CFDictionary, nil)
+        }
+    }
+    
+    func getTeacherData() -> TeacherData? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: teacherDataKey,
+            kSecReturnData as String: kCFBooleanTrue!,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        
+        var dataTypeRef: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &dataTypeRef)
+        
+        if status == errSecSuccess {
+            if let data = dataTypeRef as? Data {
+                let decoder = JSONDecoder()
+                return try? decoder.decode(TeacherData.self, from: data)
+            }
+        }
+        return nil
+    }
+    
+    func deleteTeacherData() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: teacherDataKey
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+    
+    func saveCachedRooms(_ rooms: [String]) {
+        UserDefaults.standard.set(rooms, forKey: roomsKey)
+    }
+    
+    func getCachedRooms() -> [String] {
+        return UserDefaults.standard.stringArray(forKey: roomsKey) ?? []
+    }
+}
+
+// MARK: - Firebase Manager
+class FirebaseManager: ObservableObject {
+    private let db = Firestore.firestore()
+    
+    func fetchSubjects() async -> [String] {
+        do {
+            let document = try await db.collection("subjects_list").document("subjects_list").getDocument()
+            return document.data()?["subjects_list"] as? [String] ?? []
+        } catch {
+            print("Error fetching subjects: \(error)")
+            return []
+        }
+    }
+    
+    func fetchClasses() async -> [String] {
+        do {
+            let document = try await db.collection("classes").document("classes_list").getDocument()
+            return document.data()?["classes_list"] as? [String] ?? []
+        } catch {
+            print("Error fetching classes: \(error)")
+            return []
+        }
+    }
+    
+    func fetchRooms() async -> [String] {
+        do {
+            let document = try await db.collection("rooms").document("rooms_list").getDocument()
+            return document.data()?["rooms_list"] as? [String] ?? []
+        } catch {
+            print("Error fetching rooms: \(error)")
+            return []
+        }
+    }
+    
+    func activateSession(_ sessionData: SessionData) async -> Bool {
+        do {
+            for className in sessionData.classes {
+                let sessionRef = db.collection("activeSessions").document(className)
+                let data: [String: Any] = [
+                    "date": sessionData.date,
+                    "isActive": true,
+                    "isExtra": sessionData.isExtra,
+                    "room": sessionData.room,
+                    "sessionId": sessionData.sessionId,
+                    "subject": sessionData.subject,
+                    "type": sessionData.type
+                ]
+                try await sessionRef.setData(data)
+            }
+            return true
+        } catch {
+            print("Error activating session: \(error)")
+            return false
+        }
+    }
+    
+    func endSession(_ sessionData: SessionData) async -> Bool {
+        do {
+            // End session in activeSessions
+            for className in sessionData.classes {
+                let sessionRef = db.collection("activeSessions").document(className)
+                try await sessionRef.updateData(["isActive": false])
+            }
+            
+            // Update subject counters
+            let subjectRef = db.collection("subjects").document(sessionData.subject)
+            let subjectDoc = try await subjectRef.getDocument()
+            
+            if subjectDoc.exists {
+                for className in sessionData.classes {
+                    let currentValue = subjectDoc.data()?["\(className).\(sessionData.type)"] as? Int ?? 0
+                    try await subjectRef.updateData(["\(className).\(sessionData.type)": currentValue + 1])
+                }
+            } else {
+                var data: [String: Any] = [:]
+                for className in sessionData.classes {
+                    data["\(className).\(sessionData.type)"] = 1
+                }
+                try await subjectRef.setData(data)
+            }
+            
+            return true
+        } catch {
+            print("Error ending session: \(error)")
+            return false
+        }
+    }
+    
+    func fetchAttendance(for sessionData: SessionData) async -> [AttendanceRecord] {
+        do {
+            let currentDate = Date()
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy_MM"
+            let collectionName = "attendance_\(formatter.string(from: currentDate))"
+            
+            print("🔍 Searching in collection: \(collectionName)")
+            print("📅 Session date: \(sessionData.date)")
+            print("📚 Subject: \(sessionData.subject)")
+            print("🏢 Room: \(sessionData.room)")
+            print("📝 Type: \(sessionData.type)")
+            print("👥 Classes: \(sessionData.classes)")
+            print("➕ IsExtra: \(sessionData.isExtra)")
+            
+            var attendanceRecords: [AttendanceRecord] = []
+            
+            // Search for each class/group
+            for className in sessionData.classes {
+                print("🔍 Searching for class: \(className)")
+                
+                // Query with present=true (boolean, not number)
+                let querySnapshot = try await db.collection(collectionName)
+                    .whereField("present", isEqualTo: true)
+                    .getDocuments()
+                
+                print("✅ Found \(querySnapshot.documents.count) documents with present=true")
+                
+                for doc in querySnapshot.documents {
+                    let data = doc.data()
+                    print("📊 Processing document: \(doc.documentID)")
+                    print("📊 Document data: \(data)")
+                    
+                    // Handle Firebase data types properly
+                    if let rollNumberValue = data["rollNumber"], // Can be Int or String
+                       let group = data["group"] as? String,
+                       let timestamp = data["timestamp"] as? Timestamp, // Firebase Timestamp
+                       let docDate = data["date"] as? String,
+                       let docSubject = data["subject"] as? String,
+                       let docType = data["type"] as? String,
+                       let docIsExtraValue = data["isExtra"] { // Can be Int or Bool
+                        
+                        // Convert rollNumber to String regardless of type
+                        let rollNumber: String
+                        if let intValue = rollNumberValue as? Int {
+                            rollNumber = String(intValue)
+                        } else if let stringValue = rollNumberValue as? String {
+                            rollNumber = stringValue
+                        } else {
+                            print("⚠️ Could not convert rollNumber: \(rollNumberValue)")
+                            continue
+                        }
+                        
+                        // Convert isExtra to Bool regardless of type
+                        let docIsExtra: Bool
+                        if let boolValue = docIsExtraValue as? Bool {
+                            docIsExtra = boolValue
+                        } else if let intValue = docIsExtraValue as? Int {
+                            docIsExtra = intValue == 1
+                        } else {
+                            print("⚠️ Could not convert isExtra: \(docIsExtraValue)")
+                            continue
+                        }
+                        
+                        // Handle deviceRoom (can be empty string)
+                        let deviceRoom = data["deviceRoom"] as? String ?? ""
+                        
+                        let timestampString = formatFirebaseTimestamp(timestamp)
+                        
+                        print("🔍 Checking document for \(rollNumber):")
+                        print("   📅 Date match: '\(docDate)' == '\(sessionData.date)' ? \(docDate == sessionData.date)")
+                        print("   📚 Subject match: '\(docSubject)' == '\(sessionData.subject)' ? \(docSubject == sessionData.subject)")
+                        print("   📝 Type match: '\(docType)' == '\(sessionData.type)' ? \(docType == sessionData.type)")
+                        print("   👥 Group match: '\(group)' == '\(className)' ? \(group == className)")
+                        print("   🏢 DeviceRoom: '\(deviceRoom)' (empty: \(deviceRoom.isEmpty))")
+                        print("   🏢 Room check: '\(deviceRoom)' starts with '\(sessionData.room)' ? \(deviceRoom.hasPrefix(sessionData.room))")
+                        print("   ➕ Extra match: \(docIsExtra) == \(sessionData.isExtra) ? \(docIsExtra == sessionData.isExtra)")
+                        
+                        // Check all conditions manually
+                        let dateMatch = docDate == sessionData.date
+                        let subjectMatch = docSubject == sessionData.subject
+                        let typeMatch = docType == sessionData.type
+                        let groupMatch = group == className
+                        let extraMatch = docIsExtra == sessionData.isExtra
+                        let roomMatch = !deviceRoom.isEmpty && deviceRoom.hasPrefix(sessionData.room)
+                        
+                        print("   🎯 All checks: date=\(dateMatch), subject=\(subjectMatch), type=\(typeMatch), group=\(groupMatch), extra=\(extraMatch), room=\(roomMatch)")
+                        
+                        if dateMatch && subjectMatch && typeMatch && groupMatch && extraMatch && roomMatch {
+                            print("✅ Adding attendance record for: \(rollNumber)")
+                            attendanceRecords.append(AttendanceRecord(
+                                rollNumber: rollNumber,
+                                group: group,
+                                timestamp: timestampString
+                            ))
+                        } else {
+                            print("❌ Document doesn't match all criteria")
+                        }
+                    } else {
+                        print("⚠️ Document missing required fields")
+                        print("   Available fields: \(data.keys)")
+                        if let rollNumber = data["rollNumber"] {
+                            print("   rollNumber type: \(type(of: rollNumber)) value: \(rollNumber)")
+                        }
+                        if let timestamp = data["timestamp"] {
+                            print("   timestamp type: \(type(of: timestamp)) value: \(timestamp)")
+                        }
+                        if let isExtra = data["isExtra"] {
+                            print("   isExtra type: \(type(of: isExtra)) value: \(isExtra)")
+                        }
+                    }
+                }
+            }
+            
+            print("📊 Total attendance records found: \(attendanceRecords.count)")
+            return attendanceRecords.sorted { $0.rollNumber < $1.rollNumber }
+            
+        } catch {
+            print("❌ Error fetching attendance: \(error)")
+            return []
+        }
+    }
+    
+    private func formatFirebaseTimestamp(_ timestamp: Timestamp) -> String {
+        let date = timestamp.dateValue()
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM d, yyyy 'at' h:mm:ss a zzz"
+        return formatter.string(from: date)
+    }
+}
+
+struct AttendanceRecord {
+    let rollNumber: String
+    let group: String
+    let timestamp: String
+}
