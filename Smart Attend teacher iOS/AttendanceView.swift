@@ -18,33 +18,81 @@ struct AttendanceView: View {
                 .ignoresSafeArea()
                 
                 VStack(spacing: 20) {
-                    if let sessionData = sessionData {
-                        VStack(spacing: 8) {
-                            Text("Attendance Report")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .foregroundColor(.white)
-                            
-                            Text("\(sessionData.subject)")
-                                .font(.headline)
-                                .foregroundColor(.white.opacity(0.9))
-                            
-                            HStack(spacing: 20) {
-                                Text("Room: \(sessionData.room)")
-                                Text("|\(sessionData.type.uppercased())")
-                                if sessionData.isExtra {
-                                    Text("| EXTRA")
-                                }
-                            }
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.8))
-                            
-                            Text(sessionData.date)
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                        .padding(.top, 20)
-                    }
+                   if let sessionData = sessionData {
+                       VStack(spacing: 16) {
+                           Text("Attendance Report")
+                               .font(.title2)
+                               .fontWeight(.bold)
+                               .foregroundColor(.white)
+                           
+                           VStack(spacing: 12) {
+                               // Subject badge
+                               Text(sessionData.subject)
+                                   .font(.title3)
+                                   .fontWeight(.semibold)
+                                   .foregroundColor(Color(red: 0.36, green: 0.72, blue: 1.0))
+                                   .padding(.horizontal, 20)
+                                   .padding(.vertical, 10)
+                                   .background(Color.white)
+                                   .cornerRadius(10)
+                               
+                               // Session details
+                               HStack(spacing: 20) {
+                                   VStack(spacing: 2) {
+                                       Text("ROOM")
+                                           .font(.caption2)
+                                           .fontWeight(.medium)
+                                           .foregroundColor(.white.opacity(0.7))
+                                       Text(sessionData.room)
+                                           .font(.subheadline)
+                                           .fontWeight(.semibold)
+                                           .foregroundColor(.white)
+                                   }
+                                   
+                                   Rectangle()
+                                       .fill(Color.white.opacity(0.4))
+                                       .frame(width: 1, height: 35)
+                                   
+                                   VStack(spacing: 2) {
+                                       Text("TYPE")
+                                           .font(.caption2)
+                                           .fontWeight(.medium)
+                                           .foregroundColor(.white.opacity(0.7))
+                                       Text(sessionData.type.uppercased())
+                                           .font(.subheadline)
+                                           .fontWeight(.semibold)
+                                           .foregroundColor(.white)
+                                   }
+                                   
+                                   if sessionData.isExtra {
+                                       Rectangle()
+                                           .fill(Color.white.opacity(0.4))
+                                           .frame(width: 1, height: 35)
+                                       
+                                       VStack(spacing: 2) {
+                                           Text("STATUS")
+                                               .font(.caption2)
+                                               .fontWeight(.medium)
+                                               .foregroundColor(.white.opacity(0.7))
+                                           Text("EXTRA")
+                                               .font(.subheadline)
+                                               .fontWeight(.semibold)
+                                               .foregroundColor(.orange)
+                                       }
+                                   }
+                               }
+                               
+                               Text(sessionData.date)
+                                   .font(.caption)
+                                   .foregroundColor(.white.opacity(0.8))
+                                   .padding(.top, 4)
+                           }
+                           .padding()
+                           .background(Color.white.opacity(0.15))
+                           .cornerRadius(12)
+                       }
+                       .padding(.top, 20)
+                   }
                     
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {

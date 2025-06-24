@@ -11,6 +11,9 @@ import FirebaseFirestore
 
 @main
 struct TeacherApp: App {
+    @StateObject private var authManager = AuthManager()
+    @StateObject private var sessionManager = SessionManager()
+    
     init() {
         FirebaseApp.configure()
     }
@@ -18,6 +21,17 @@ struct TeacherApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(authManager)
+                .environmentObject(sessionManager)
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                    sessionManager.endActiveSession()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+                    sessionManager.endActiveSession()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
+                    sessionManager.endActiveSession()
+                }
         }
     }
 }

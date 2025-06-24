@@ -5,20 +5,36 @@ import FirebaseFirestore
 
 
 struct ContentView: View {
-    @StateObject private var authManager = AuthManager()
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var sessionManager: SessionManager
+    @State private var showSplash = true
     
     var body: some View {
         Group {
-            if authManager.isLoggedIn {
-                HomeView()
-                    .environmentObject(authManager)
+            if showSplash {
+                SplashScreenView()
+                    .onAppear {
+                        // Hide splash after 3 seconds
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                            withAnimation(.easeInOut(duration: 0.5)) {
+                                showSplash = false
+                            }
+                        }
+                    }
             } else {
-                LoginView()
-                    .environmentObject(authManager)
+                if authManager.isLoggedIn {
+                    HomeView()
+                        .environmentObject(authManager)
+                        .environmentObject(sessionManager)
+                } else {
+                    LoginView()
+                        .environmentObject(authManager)
+                }
             }
         }
     }
 }
+
 
 // MARK: - Auth Manager
 class AuthManager: ObservableObject {
@@ -51,6 +67,56 @@ class AuthManager: ObservableObject {
     }
 }
 
+// MARK: - Session Manager
+class SessionManager: ObservableObject {
+    @Published var isSessionActive = false
+    @Published var currentSessionData: SessionData?
+    
+    private let firebaseManager = FirebaseManager()
+    
+    func startSession(_ sessionData: SessionData) {
+        self.currentSessionData = sessionData
+        self.isSessionActive = true
+    }
+    
+    func endActiveSession() {
+        guard let sessionData = currentSessionData, isSessionActive else { return }
+        
+        print("📱 App minimized/closed - ending active session")
+        
+        Task {
+            let success = await firebaseManager.endSession(sessionData)
+            
+            await MainActor.run {
+                if success {
+                    print("✅ Session ended successfully due to app state change")
+                } else {
+                    print("❌ Failed to end session due to app state change")
+                }
+                
+                // Reset session state completely when app is closed
+                self.isSessionActive = false
+                self.currentSessionData = nil
+            }
+        }
+    }
+    
+    func manualEndSession() async -> Bool {
+        guard let sessionData = currentSessionData, isSessionActive else { return false }
+        
+        let success = await firebaseManager.endSession(sessionData)
+        
+        if success {
+            await MainActor.run {
+                self.isSessionActive = false
+                // Keep currentSessionData for potential attendance viewing
+            }
+        }
+        
+        return success
+    }
+}
+
 // MARK: - Data Models
 struct TeacherData: Codable {
     let name: String
@@ -68,6 +134,12 @@ struct SessionData {
     let date: String
     let sessionId: String
     let isActive: Bool
+}
+
+struct AttendanceRecord {
+    let rollNumber: String
+    let group: String
+    let timestamp: String
 }
 
 // MARK: - Keychain Manager
@@ -162,6 +234,7 @@ class FirebaseManager: ObservableObject {
     
     func activateSession(_ sessionData: SessionData) async -> Bool {
         do {
+            // First, activate the session in activeSessions
             for className in sessionData.classes {
                 let sessionRef = db.collection("activeSessions").document(className)
                 let data: [String: Any] = [
@@ -175,6 +248,41 @@ class FirebaseManager: ObservableObject {
                 ]
                 try await sessionRef.setData(data)
             }
+
+            // Then increment the subject counters
+            let subjectRef = db.collection("subjects").document(sessionData.subject)
+            
+            for className in sessionData.classes {
+                let subjectDoc = try await subjectRef.getDocument()
+                
+                if subjectDoc.exists {
+                    // Get existing data for this class
+                    let existingData = subjectDoc.data() ?? [:]
+                    var classData = existingData[className] as? [String: Int] ?? [:]
+
+                    // Initialize missing fields with 0
+                    if classData["lect"] == nil { classData["lect"] = 0 }
+                    if classData["lab"] == nil { classData["lab"] = 0 }
+                    if classData["tut"] == nil { classData["tut"] = 0 }
+
+                    // Increment the specific type when session STARTS
+                    classData[sessionData.type] = (classData[sessionData.type] ?? 0) + 1
+
+                    // Update only this class data in the document
+                    try await subjectRef.updateData([className: classData])
+                } else {
+                    // Create new document with proper structure for this class only
+                    let newClassData: [String: Int] = [
+                        "lect": sessionData.type == "lect" ? 1 : 0,
+                        "lab": sessionData.type == "lab" ? 1 : 0,
+                        "tut": sessionData.type == "tut" ? 1 : 0
+                    ]
+
+                    // Use merge to avoid overwriting other classes that might exist
+                    try await subjectRef.setData([className: newClassData], merge: true)
+                }
+            }
+
             return true
         } catch {
             print("Error activating session: \(error)")
@@ -184,27 +292,10 @@ class FirebaseManager: ObservableObject {
     
     func endSession(_ sessionData: SessionData) async -> Bool {
         do {
-            // End session in activeSessions
+            // Only end session in activeSessions - NO counter incrementing here
             for className in sessionData.classes {
                 let sessionRef = db.collection("activeSessions").document(className)
                 try await sessionRef.updateData(["isActive": false])
-            }
-            
-            // Update subject counters
-            let subjectRef = db.collection("subjects").document(sessionData.subject)
-            let subjectDoc = try await subjectRef.getDocument()
-            
-            if subjectDoc.exists {
-                for className in sessionData.classes {
-                    let currentValue = subjectDoc.data()?["\(className).\(sessionData.type)"] as? Int ?? 0
-                    try await subjectRef.updateData(["\(className).\(sessionData.type)": currentValue + 1])
-                }
-            } else {
-                var data: [String: Any] = [:]
-                for className in sessionData.classes {
-                    data["\(className).\(sessionData.type)"] = 1
-                }
-                try await subjectRef.setData(data)
             }
             
             return true
@@ -343,10 +434,4 @@ class FirebaseManager: ObservableObject {
         formatter.dateFormat = "MMMM d, yyyy 'at' h:mm:ss a zzz"
         return formatter.string(from: date)
     }
-}
-
-struct AttendanceRecord {
-    let rollNumber: String
-    let group: String
-    let timestamp: String
 }

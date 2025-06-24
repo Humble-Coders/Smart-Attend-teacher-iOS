@@ -15,10 +15,10 @@ struct LoginView: View {
     @State private var showSubjectDropdown = false
     @State private var showClassDropdown = false
     @State private var isLoading = false
-    @State private var showNewSubjectDialog = false
-    @State private var showNewClassDialog = false
-    @State private var newSubjectText = ""
-    @State private var newClassText = ""
+    @State private var availableSubjectsForAdding: [String] = []
+    @State private var availableClassesForAdding: [String] = []
+    @State private var showSubjectSelectionSheet = false
+    @State private var showClassSelectionSheet = false
     
     private let designations = ["Mr.", "Mrs.", "Ms.", "Dr.", "Prof."]
     
@@ -80,6 +80,9 @@ struct LoginView: View {
                             VStack(spacing: 12) {
                                 TextField("Enter your name", text: $name)
                                     .textFieldStyle(CustomTextFieldStyle())
+                                    .onSubmit {
+                                        hideKeyboard()
+                                    }
                                 
                                 Menu {
                                     ForEach(designations, id: \.self) { designation in
@@ -104,9 +107,22 @@ struct LoginView: View {
                         
                         // Subjects Section
                         VStack(alignment: .leading, spacing: 15) {
-                            Text("Subjects You Teach")
-                                .font(.headline)
-                                .foregroundColor(.white)
+                            HStack {
+                                Text("Subjects You Teach")
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                
+                                Spacer()
+                                
+                                Button(action: {
+                                    loadAvailableSubjects()
+                                    showSubjectSelectionSheet = true
+                                }) {
+                                    Image(systemName: "plus.circle.fill")
+                                        .foregroundColor(.white)
+                                        .font(.title2)
+                                }
+                            }
                             
                             VStack(spacing: 8) {
                                 SearchableDropdown(
@@ -114,8 +130,7 @@ struct LoginView: View {
                                     selectedItems: $selectedSubjects,
                                     showDropdown: $showSubjectDropdown,
                                     availableItems: filteredSubjects,
-                                    placeholder: "Search subjects...",
-                                    onAddNew: { showNewSubjectDialog = true }
+                                    placeholder: "Search subjects..."
                                 )
                                 
                                 SelectedItemsView(items: selectedSubjects) { item in
@@ -126,9 +141,22 @@ struct LoginView: View {
                         
                         // Classes Section
                         VStack(alignment: .leading, spacing: 15) {
-                            Text("Classes You Teach")
-                                .font(.headline)
-                                .foregroundColor(.white)
+                            HStack {
+                                Text("Classes You Teach")
+                                    .font(.headline)
+                                    .foregroundColor(.white)
+                                
+                                Spacer()
+                                
+                                Button(action: {
+                                    loadAvailableClasses()
+                                    showClassSelectionSheet = true
+                                }) {
+                                    Image(systemName: "plus.circle.fill")
+                                        .foregroundColor(.white)
+                                        .font(.title2)
+                                }
+                            }
                             
                             VStack(spacing: 8) {
                                 SearchableDropdown(
@@ -136,8 +164,7 @@ struct LoginView: View {
                                     selectedItems: $selectedClasses,
                                     showDropdown: $showClassDropdown,
                                     availableItems: filteredClasses,
-                                    placeholder: "Search classes...",
-                                    onAddNew: { showNewClassDialog = true }
+                                    placeholder: "Search classes..."
                                 )
                                 
                                 SelectedItemsView(items: selectedClasses) { item in
@@ -153,7 +180,7 @@ struct LoginView: View {
                                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
                                         .scaleEffect(0.8)
                                 } else {
-                                    Text("Complete Setup")
+                                    Text("Sign In")
                                         .fontWeight(.semibold)
                                 }
                             }
@@ -181,29 +208,17 @@ struct LoginView: View {
         .onAppear {
             loadData()
         }
-        .alert("Add New Subject", isPresented: $showNewSubjectDialog) {
-            TextField("Subject name", text: $newSubjectText)
-            Button("Add") {
-                if !newSubjectText.isEmpty {
-                    selectedSubjects.append(newSubjectText)
-                    newSubjectText = ""
-                }
-            }
-            Button("Cancel", role: .cancel) {
-                newSubjectText = ""
-            }
+        .sheet(isPresented: $showSubjectSelectionSheet) {
+            SubjectSelectionSheet(
+                availableSubjects: availableSubjectsForAdding,
+                onSubjectSelected: addSubjectToSelection
+            )
         }
-        .alert("Add New Class", isPresented: $showNewClassDialog) {
-            TextField("Class name", text: $newClassText)
-            Button("Add") {
-                if !newClassText.isEmpty {
-                    selectedClasses.append(newClassText)
-                    newClassText = ""
-                }
-            }
-            Button("Cancel", role: .cancel) {
-                newClassText = ""
-            }
+        .sheet(isPresented: $showClassSelectionSheet) {
+            ClassSelectionSheet(
+                availableClasses: availableClassesForAdding,
+                onClassSelected: addClassToSelection
+            )
         }
     }
     
@@ -214,6 +229,44 @@ struct LoginView: View {
             
             availableSubjects = await subjects
             availableClasses = await classes
+        }
+    }
+    
+    private func loadAvailableSubjects() {
+        Task {
+            let allSubjects = await firebaseManager.fetchSubjects()
+            
+            await MainActor.run {
+                // Show only subjects that aren't already selected
+                availableSubjectsForAdding = allSubjects.filter { !selectedSubjects.contains($0) }
+            }
+        }
+    }
+    
+    private func loadAvailableClasses() {
+        Task {
+            let allClasses = await firebaseManager.fetchClasses()
+            
+            await MainActor.run {
+                // Show only classes that aren't already selected
+                availableClassesForAdding = allClasses.filter { !selectedClasses.contains($0) }
+            }
+        }
+    }
+    
+    private func addSubjectToSelection(_ subject: String) {
+        if !selectedSubjects.contains(subject) {
+            selectedSubjects.append(subject)
+            // Update available list
+            availableSubjectsForAdding.removeAll { $0 == subject }
+        }
+    }
+    
+    private func addClassToSelection(_ className: String) {
+        if !selectedClasses.contains(className) {
+            selectedClasses.append(className)
+            // Update available list
+            availableClassesForAdding.removeAll { $0 == className }
         }
     }
     
@@ -234,13 +287,6 @@ struct LoginView: View {
     }
 }
 
-// MARK: - Extensions
-extension View {
-    func hideKeyboard() {
-        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-    }
-}
-
 struct CustomTextFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
@@ -257,27 +303,22 @@ struct SearchableDropdown: View {
     @Binding var showDropdown: Bool
     let availableItems: [String]
     let placeholder: String
-    let onAddNew: () -> Void
     
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                TextField(placeholder, text: $searchText)
-                    .onChange(of: searchText) { _ in
-                        showDropdown = !searchText.isEmpty
-                    }
-                    .onTapGesture {
-                        showDropdown = true
-                    }
-                
-                Button(action: onAddNew) {
-                    Image(systemName: "plus.circle.fill")
-                        .foregroundColor(Color(red: 0.36, green: 0.72, blue: 1.0))
+            TextField(placeholder, text: $searchText)
+                .onChange(of: searchText) { _ in
+                    showDropdown = !searchText.isEmpty
                 }
-            }
-            .padding()
-            .background(Color.white)
-            .cornerRadius(12)
+                .onTapGesture {
+                    showDropdown = true
+                }
+                .onSubmit {
+                    hideKeyboard()
+                }
+                .padding()
+                .background(Color.white)
+                .cornerRadius(12)
             
             if showDropdown && !availableItems.isEmpty {
                 ScrollView {
@@ -351,5 +392,12 @@ struct SelectedItemsView: View {
                 .padding(.horizontal, 4)
             }
         }
+    }
+}
+
+// MARK: - Extensions
+extension View {
+    func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
