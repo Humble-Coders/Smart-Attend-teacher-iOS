@@ -241,6 +241,8 @@ struct HomeView: View {
                                        .font(.caption)
                                        .foregroundColor(.secondary)
                                    
+                                   // Fixed Room Selection in HomeView - replace the existing room selection VStack
+                                   // Fixed Room Selection in HomeView - replace the existing room selection VStack
                                    VStack(spacing: 0) {
                                        TextField("Search room...", text: $roomSearchText)
                                            .onChange(of: roomSearchText) { _ in
@@ -278,6 +280,7 @@ struct HomeView: View {
                                                            }
                                                            .padding()
                                                            .background(Color.white)
+                                                           .contentShape(Rectangle()) // This ensures the entire area is tappable
                                                        }
                                                        .buttonStyle(PlainButtonStyle())
                                                        
@@ -694,244 +697,316 @@ struct SessionCard<Content: View>: View {
    }
 }
 
+// Updated SubjectSelectionSheet
 struct SubjectSelectionSheet: View {
-   let availableSubjects: [String]
-   let onSubjectSelected: (String) -> Void
-   @Environment(\.dismiss) private var dismiss
-   
-   @State private var searchText = ""
-   
-   var filteredSubjects: [String] {
-       if searchText.isEmpty {
-           return availableSubjects
-       }
-       return availableSubjects.filter { $0.localizedCaseInsensitiveContains(searchText) }
-   }
-   
-   var body: some View {
-       NavigationView {
-           ZStack {
-               LinearGradient(
-                   gradient: Gradient(colors: [Color(red: 0.36, green: 0.72, blue: 1.0), Color(red: 0.58, green: 0.65, blue: 1.0)]),
-                   startPoint: .top,
-                   endPoint: .bottom
-               )
-               .ignoresSafeArea()
-               
-               VStack(spacing: 20) {
-                   VStack(spacing: 8) {
-                       Text("Add Subject")
-                           .font(.title2)
-                           .fontWeight(.bold)
-                           .foregroundColor(.white)
-                       
-                       Text("Select subjects from the master list to add to your teaching profile")
-                           .font(.subheadline)
-                           .foregroundColor(.white.opacity(0.9))
-                           .multilineTextAlignment(.center)
-                   }
-                   .padding(.top, 20)
-                   
-                   VStack(spacing: 12) {
-                       // Search Bar
-                       TextField("Search subjects...", text: $searchText)
-                           .padding()
-                           .background(Color.white.opacity(0.9))
-                           .cornerRadius(12)
-                           .onSubmit {
-                               hideKeyboard()
-                           }
-                       
-                       // Subjects List
-                       if filteredSubjects.isEmpty {
-                           VStack(spacing: 16) {
-                               Image(systemName: "book.closed")
-                                   .font(.system(size: 40))
-                                   .foregroundColor(.white.opacity(0.6))
-                               
-                               Text(searchText.isEmpty ? "All subjects already added" : "No subjects found")
-                                   .font(.subheadline)
-                                   .foregroundColor(.white.opacity(0.8))
-                           }
-                           .frame(maxWidth: .infinity)
-                           .padding(40)
-                           .background(Color.white.opacity(0.1))
-                           .cornerRadius(12)
-                       } else {
-                           ScrollView {
-                               LazyVStack(spacing: 8) {
-                                   ForEach(filteredSubjects, id: \.self) { subject in
-                                       Button(action: {
-                                           onSubjectSelected(subject)
-                                           dismiss()
-                                       }) {
-                                           HStack {
-                                               VStack(alignment: .leading, spacing: 4) {
-                                                   Text(subject)
-                                                       .font(.headline)
-                                                       .foregroundColor(.primary)
-                                                   
-                                                   Text("Tap to add to your subjects")
-                                                       .font(.caption)
-                                                       .foregroundColor(.secondary)
-                                               }
-                                               
-                                               Spacer()
-                                               
-                                               Image(systemName: "plus.circle.fill")
-                                                   .font(.title2)
-                                                   .foregroundColor(Color(red: 0.36, green: 0.72, blue: 1.0))
-                                           }
-                                           .padding()
-                                           .background(Color.white.opacity(0.95))
-                                           .cornerRadius(12)
-                                       }
-                                       .buttonStyle(PlainButtonStyle())
-                                   }
-                               }
-                               .padding()
-                           }
-                           .background(Color.white.opacity(0.1))
-                           .cornerRadius(12)
-                       }
-                   }
-                   .padding(.horizontal, 20)
-                   
-                   Spacer()
-               }
-           }
-           .navigationTitle("Add Subject")
-           .navigationBarTitleDisplayMode(.inline)
-           .toolbar {
-               ToolbarItem(placement: .navigationBarTrailing) {
-                   Button("Cancel") {
-                       dismiss()
-                   }
-                   .foregroundColor(.white)
-               }
-           }
-       }
-   }
+    let availableSubjects: [String]
+    let onSubjectSelected: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var searchText = ""
+    @State private var selectedSubjects: Set<String> = []
+    
+    var filteredSubjects: [String] {
+        if searchText.isEmpty {
+            return availableSubjects
+        }
+        return availableSubjects.filter { $0.localizedCaseInsensitiveContains(searchText) }
+    }
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                LinearGradient(
+                    gradient: Gradient(colors: [Color(red: 0.36, green: 0.72, blue: 1.0), Color(red: 0.58, green: 0.65, blue: 1.0)]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                
+                VStack(spacing: 20) {
+                    VStack(spacing: 8) {
+                        Text("Add Subject")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Text("Select subjects from the master list to add to your teaching profile")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.top, 20)
+                    
+                    VStack(spacing: 12) {
+                        // Search Bar
+                        TextField("Search subjects...", text: $searchText)
+                            .padding()
+                            .background(Color.white.opacity(0.9))
+                            .cornerRadius(12)
+                            .onSubmit {
+                                hideKeyboard()
+                            }
+                        
+                        // Subjects List
+                        if filteredSubjects.isEmpty {
+                            VStack(spacing: 16) {
+                                Image(systemName: "book.closed")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(.white.opacity(0.6))
+                                
+                                Text(searchText.isEmpty ? "All subjects already added" : "No subjects found")
+                                    .font(.subheadline)
+                                    .foregroundColor(.white.opacity(0.8))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(40)
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(12)
+                        } else {
+                            ScrollView {
+                                LazyVStack(spacing: 8) {
+                                    ForEach(filteredSubjects, id: \.self) { subject in
+                                        Button(action: {
+                                            if selectedSubjects.contains(subject) {
+                                                selectedSubjects.remove(subject)
+                                            } else {
+                                                selectedSubjects.insert(subject)
+                                            }
+                                        }) {
+                                            HStack {
+                                                VStack(alignment: .leading, spacing: 4) {
+                                                    Text(subject)
+                                                        .font(.headline)
+                                                        .foregroundColor(.primary)
+                                                    
+                                                    Text(selectedSubjects.contains(subject) ? "Selected" : "Tap to select")
+                                                        .font(.caption)
+                                                        .foregroundColor(.secondary)
+                                                }
+                                                
+                                                Spacer()
+                                                
+                                                Circle()
+                                                    .fill(selectedSubjects.contains(subject) ? Color.green : Color.clear)
+                                                    .frame(width: 28, height: 28)
+                                                    .overlay(
+                                                        Circle()
+                                                            .stroke(selectedSubjects.contains(subject) ? Color.green : Color(red: 0.36, green: 0.72, blue: 1.0), lineWidth: 2)
+                                                    )
+                                                    .overlay(
+                                                        Image(systemName: selectedSubjects.contains(subject) ? "checkmark" : "plus")
+                                                            .font(.system(size: 14, weight: .bold))
+                                                            .foregroundColor(selectedSubjects.contains(subject) ? .white : Color(red: 0.36, green: 0.72, blue: 1.0))
+                                                    )
+                                            }
+                                            .padding()
+                                            .background(Color.white.opacity(0.95))
+                                            .cornerRadius(12)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                    }
+                                }
+                                .padding()
+                            }
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(12)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    
+                    // Done Button - Only show if subjects are selected
+                    if !selectedSubjects.isEmpty {
+                        Button(action: {
+                            for subject in selectedSubjects {
+                                onSubjectSelected(subject)
+                            }
+                            dismiss()
+                        }) {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                Text("Done (\(selectedSubjects.count) selected)")
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.green)
+                            .cornerRadius(12)
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                    
+                    Spacer()
+                }
+            }
+            .navigationTitle("Add Subject")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+        }
+    }
 }
 
+// Updated ClassSelectionSheet
 struct ClassSelectionSheet: View {
-   let availableClasses: [String]
-   let onClassSelected: (String) -> Void
-   @Environment(\.dismiss) private var dismiss
-   
-   @State private var searchText = ""
-   
-   var filteredClasses: [String] {
-       if searchText.isEmpty {
-           return availableClasses
-       }
-       return availableClasses.filter { $0.localizedCaseInsensitiveContains(searchText) }
-   }
-   
-   var body: some View {
-       NavigationView {
-           ZStack {
-               LinearGradient(
-                   gradient: Gradient(colors: [Color(red: 0.36, green: 0.72, blue: 1.0), Color(red: 0.58, green: 0.65, blue: 1.0)]),
-                   startPoint: .top,
-                   endPoint: .bottom
-               )
-               .ignoresSafeArea()
-               
-               VStack(spacing: 20) {
-                   VStack(spacing: 8) {
-                       Text("Add Class")
-                           .font(.title2)
-                           .fontWeight(.bold)
-                           .foregroundColor(.white)
-                       
-                       Text("Select classes from the master list to add to your teaching profile")
-                           .font(.subheadline)
-                           .foregroundColor(.white.opacity(0.9))
-                           .multilineTextAlignment(.center)
-                   }
-                   .padding(.top, 20)
-                   
-                   VStack(spacing: 12) {
-                       // Search Bar
-                       TextField("Search classes...", text: $searchText)
-                           .padding()
-                           .background(Color.white.opacity(0.9))
-                           .cornerRadius(12)
-                           .onSubmit {
-                               hideKeyboard()
-                           }
-                       
-                       // Classes List
-                       if filteredClasses.isEmpty {
-                           VStack(spacing: 16) {
-                               Image(systemName: "person.3")
-                                   .font(.system(size: 40))
-                                   .foregroundColor(.white.opacity(0.6))
-                               
-                               Text(searchText.isEmpty ? "All classes already added" : "No classes found")
-                                   .font(.subheadline)
-                                   .foregroundColor(.white.opacity(0.8))
-                           }
-                           .frame(maxWidth: .infinity)
-                           .padding(40)
-                           .background(Color.white.opacity(0.1))
-                           .cornerRadius(12)
-                       } else {
-                           ScrollView {
-                               LazyVStack(spacing: 8) {
-                                   ForEach(filteredClasses, id: \.self) { className in
-                                       Button(action: {
-                                           onClassSelected(className)
-                                           dismiss()
-                                       }) {
-                                           HStack {
-                                               VStack(alignment: .leading, spacing: 4) {
-                                                   Text(className)
-                                                       .font(.headline)
-                                                       .foregroundColor(.primary)
-                                                   
-                                                   Text("Tap to add to your classes")
-                                                       .font(.caption)
-                                                       .foregroundColor(.secondary)
-                                               }
-                                               
-                                               Spacer()
-                                               
-                                               Image(systemName: "plus.circle.fill")
-                                                   .font(.title2)
-                                                   .foregroundColor(Color(red: 0.36, green: 0.72, blue: 1.0))
-                                           }
-                                           .padding()
-                                           .background(Color.white.opacity(0.95))
-                                           .cornerRadius(12)
-                                       }
-                                       .buttonStyle(PlainButtonStyle())
-                                   }
-                               }
-                               .padding()
-                           }
-                           .background(Color.white.opacity(0.1))
-                           .cornerRadius(12)
-                       }
-                   }
-                   .padding(.horizontal, 20)
-                   
-                   Spacer()
-               }
-           }
-           .navigationTitle("Add Class")
-           .navigationBarTitleDisplayMode(.inline)
-           .toolbar {
-               ToolbarItem(placement: .navigationBarTrailing) {
-                   Button("Cancel") {
-                       dismiss()
-                   }
-                   .foregroundColor(.white)
-               }
-           }
-       }
-   }
+    let availableClasses: [String]
+    let onClassSelected: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    
+    @State private var searchText = ""
+    @State private var selectedClasses: Set<String> = []
+    
+    var filteredClasses: [String] {
+        if searchText.isEmpty {
+            return availableClasses
+        }
+        return availableClasses.filter { $0.localizedCaseInsensitiveContains(searchText) }
+    }
+    
+    var body: some View {
+        NavigationView {
+            ZStack {
+                LinearGradient(
+                    gradient: Gradient(colors: [Color(red: 0.36, green: 0.72, blue: 1.0), Color(red: 0.58, green: 0.65, blue: 1.0)]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .ignoresSafeArea()
+                
+                VStack(spacing: 20) {
+                    VStack(spacing: 8) {
+                        Text("Add Class")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                        
+                        Text("Select classes from the master list to add to your teaching profile")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.9))
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.top, 20)
+                    
+                    VStack(spacing: 12) {
+                        // Search Bar
+                        TextField("Search classes...", text: $searchText)
+                            .padding()
+                            .background(Color.white.opacity(0.9))
+                            .cornerRadius(12)
+                            .onSubmit {
+                                hideKeyboard()
+                            }
+                        
+                        // Classes List
+                        if filteredClasses.isEmpty {
+                            VStack(spacing: 16) {
+                                Image(systemName: "person.3")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(.white.opacity(0.6))
+                                
+                                Text(searchText.isEmpty ? "All classes already added" : "No classes found")
+                                    .font(.subheadline)
+                                    .foregroundColor(.white.opacity(0.8))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(40)
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(12)
+                        } else {
+                            ScrollView {
+                                LazyVStack(spacing: 8) {
+                                    ForEach(filteredClasses, id: \.self) { className in
+                                        Button(action: {
+                                            if selectedClasses.contains(className) {
+                                                selectedClasses.remove(className)
+                                            } else {
+                                                selectedClasses.insert(className)
+                                            }
+                                        }) {
+                                            HStack {
+                                                VStack(alignment: .leading, spacing: 4) {
+                                                    Text(className)
+                                                        .font(.headline)
+                                                        .foregroundColor(.primary)
+                                                    
+                                                    Text(selectedClasses.contains(className) ? "Selected" : "Tap to select")
+                                                        .font(.caption)
+                                                        .foregroundColor(.secondary)
+                                                }
+                                                
+                                                Spacer()
+                                                
+                                                Circle()
+                                                    .fill(selectedClasses.contains(className) ? Color.green : Color.clear)
+                                                    .frame(width: 28, height: 28)
+                                                    .overlay(
+                                                        Circle()
+                                                            .stroke(selectedClasses.contains(className) ? Color.green : Color(red: 0.36, green: 0.72, blue: 1.0), lineWidth: 2)
+                                                    )
+                                                    .overlay(
+                                                        Image(systemName: selectedClasses.contains(className) ? "checkmark" : "plus")
+                                                            .font(.system(size: 14, weight: .bold))
+                                                            .foregroundColor(selectedClasses.contains(className) ? .white : Color(red: 0.36, green: 0.72, blue: 1.0))
+                                                    )
+                                            }
+                                            .padding()
+                                            .background(Color.white.opacity(0.95))
+                                            .cornerRadius(12)
+                                        }
+                                        .buttonStyle(PlainButtonStyle())
+                                    }
+                                }
+                                .padding()
+                            }
+                            .background(Color.white.opacity(0.1))
+                            .cornerRadius(12)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    
+                    // Done Button - Only show if classes are selected
+                    if !selectedClasses.isEmpty {
+                        Button(action: {
+                            for className in selectedClasses {
+                                onClassSelected(className)
+                            }
+                            dismiss()
+                        }) {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                Text("Done (\(selectedClasses.count) selected)")
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.green)
+                            .cornerRadius(12)
+                        }
+                        .padding(.horizontal, 20)
+                    }
+                    
+                    Spacer()
+                }
+            }
+            .navigationTitle("Add Class")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Extensions
