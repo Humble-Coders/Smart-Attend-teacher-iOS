@@ -1,13 +1,7 @@
-//
-//  Smart_Attend_teacher_iOSApp.swift
-//  Smart Attend teacher iOS
-//
-//  Created by Ansh Bajaj on 16/06/25.
-//
-
 import SwiftUI
 import FirebaseCore
 import FirebaseFirestore
+import BackgroundTasks
 
 @main
 struct TeacherApp: App {
@@ -16,6 +10,9 @@ struct TeacherApp: App {
     
     init() {
         FirebaseApp.configure()
+        
+        // Register background tasks BEFORE app finishes launching
+        registerBackgroundTasks()
     }
     
     var body: some Scene {
@@ -23,15 +20,33 @@ struct TeacherApp: App {
             ContentView()
                 .environmentObject(authManager)
                 .environmentObject(sessionManager)
-                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-                    sessionManager.endActiveSession()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
-                    sessionManager.endActiveSession()
-                }
-                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
-                    sessionManager.endActiveSession()
-                }
         }
+    }
+    
+    private func registerBackgroundTasks() {
+        // Register the background task handler early
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: "com.humblecoders.smartattend.session-timer",
+            using: nil
+        ) { task in
+            handleBackgroundSessionTimer(task as! BGProcessingTask)
+        }
+    }
+    
+    private func handleBackgroundSessionTimer(_ task: BGProcessingTask) {
+        print("🔄 Background task executing from app level")
+        
+        // Set expiration handler
+        task.expirationHandler = {
+            print("⚠️ Background task expired")
+            task.setTaskCompleted(success: false)
+        }
+        
+        // Check if we need to end any active sessions
+        // This is a backup mechanism - the SessionTimerManager handles the primary logic
+        
+        // For now, just complete the task
+        // The actual session ending logic is handled by SessionTimerManager
+        task.setTaskCompleted(success: true)
     }
 }

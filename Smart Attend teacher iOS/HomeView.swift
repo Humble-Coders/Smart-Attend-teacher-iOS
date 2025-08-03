@@ -5,6 +5,7 @@ struct HomeView: View {
    @EnvironmentObject var sessionManager: SessionManager
    @StateObject private var firebaseManager = FirebaseManager()
    @StateObject private var keychainManager = KeychainManager()
+   @StateObject private var timerManager = SessionTimerManager()
    
    @State private var selectedClasses: [String] = []
    @State private var selectedSubject = ""
@@ -18,9 +19,6 @@ struct HomeView: View {
    @State private var isLoading = false
    @State private var showAlert = false
    @State private var alertMessage = ""
-   @State private var showEndSessionConfirm = false
-   @State private var showAddSubjectDialog = false
-   @State private var showAddClassDialog = false
    @State private var availableSubjectsForAdding: [String] = []
    @State private var availableClassesForAdding: [String] = []
    @State private var showSubjectSelectionSheet = false
@@ -41,7 +39,7 @@ struct HomeView: View {
    }
    
    var canActivateSession: Bool {
-       !selectedClasses.isEmpty && !selectedSubject.isEmpty && !selectedRoom.isEmpty
+       !selectedClasses.isEmpty && !selectedSubject.isEmpty && !selectedRoom.isEmpty && !sessionManager.isSessionActive
    }
    
    var body: some View {
@@ -57,7 +55,6 @@ struct HomeView: View {
                ScrollView {
                    VStack(spacing: 25) {
                        // Enhanced Header
-                       // Enhanced Header with Teacher Card Only
                        VStack(spacing: 20) {
                           // Professional Teacher Greeting Card
                           VStack(spacing: 12) {
@@ -102,7 +99,12 @@ struct HomeView: View {
                                   
                                   // Professional Logout Button
                                   Button(action: {
-                                      showLogoutConfirm = true
+                                      if sessionManager.isSessionActive {
+                                          alertMessage = "Cannot logout during active session. Please end the session first."
+                                          showAlert = true
+                                      } else {
+                                          showLogoutConfirm = true
+                                      }
                                   }) {
                                       HStack(spacing: 6) {
                                           Text("Logout")
@@ -113,7 +115,7 @@ struct HomeView: View {
                                       .foregroundColor(.white)
                                       .padding(.horizontal, 16)
                                       .padding(.vertical, 8)
-                                      .background(Color.white.opacity(0.2))
+                                      .background(sessionManager.isSessionActive ? Color.gray.opacity(0.3) : Color.white.opacity(0.2))
                                       .cornerRadius(20)
                                       .overlay(
                                           RoundedRectangle(cornerRadius: 20)
@@ -147,22 +149,27 @@ struct HomeView: View {
                                        Spacer()
                                        
                                        Button(action: {
-                                           loadAvailableClasses()
-                                           showClassSelectionSheet = true
+                                           if !sessionManager.isSessionActive {
+                                               loadAvailableClasses()
+                                               showClassSelectionSheet = true
+                                           }
                                        }) {
                                            Image(systemName: "plus.circle.fill")
-                                               .foregroundColor(Color(red: 0.36, green: 0.72, blue: 1.0))
+                                               .foregroundColor(sessionManager.isSessionActive ? .gray : Color(red: 0.36, green: 0.72, blue: 1.0))
                                                .font(.title2)
                                        }
+                                       .disabled(sessionManager.isSessionActive)
                                    }
                                    
                                    ForEach(authManager.teacherData?.classes ?? [], id: \.self) { className in
                                        HStack {
                                            Button(action: {
-                                               if selectedClasses.contains(className) {
-                                                   selectedClasses.removeAll { $0 == className }
-                                               } else {
-                                                   selectedClasses.append(className)
+                                               if !sessionManager.isSessionActive {
+                                                   if selectedClasses.contains(className) {
+                                                       selectedClasses.removeAll { $0 == className }
+                                                   } else {
+                                                       selectedClasses.append(className)
+                                                   }
                                                }
                                            }) {
                                                HStack {
@@ -170,12 +177,13 @@ struct HomeView: View {
                                                        .foregroundColor(selectedClasses.contains(className) ? Color(red: 0.36, green: 0.72, blue: 1.0) : .secondary)
                                                    
                                                    Text(className)
-                                                       .foregroundColor(.primary)
+                                                       .foregroundColor(sessionManager.isSessionActive ? .secondary : .primary)
                                                    
                                                    Spacer()
                                                }
                                            }
                                            .buttonStyle(PlainButtonStyle())
+                                           .disabled(sessionManager.isSessionActive)
                                        }
                                    }
                                }
@@ -192,30 +200,36 @@ struct HomeView: View {
                                        Menu {
                                            ForEach(authManager.teacherData?.subjects ?? [], id: \.self) { subject in
                                                Button(subject) {
-                                                   selectedSubject = subject
+                                                   if !sessionManager.isSessionActive {
+                                                       selectedSubject = subject
+                                                   }
                                                }
                                            }
                                        } label: {
                                            HStack {
                                                Text(selectedSubject.isEmpty ? "Select Subject" : selectedSubject)
-                                                   .foregroundColor(selectedSubject.isEmpty ? .secondary : .primary)
+                                                   .foregroundColor(selectedSubject.isEmpty ? .secondary : (sessionManager.isSessionActive ? .secondary : .primary))
                                                Spacer()
                                                Image(systemName: "chevron.down")
                                                    .foregroundColor(.secondary)
                                            }
                                            .padding()
-                                           .background(Color.gray.opacity(0.1))
+                                           .background(Color.gray.opacity(sessionManager.isSessionActive ? 0.05 : 0.1))
                                            .cornerRadius(8)
                                        }
+                                       .disabled(sessionManager.isSessionActive)
                                        
                                        Button(action: {
-                                           loadAvailableSubjects()
-                                           showSubjectSelectionSheet = true
+                                           if !sessionManager.isSessionActive {
+                                               loadAvailableSubjects()
+                                               showSubjectSelectionSheet = true
+                                           }
                                        }) {
                                            Image(systemName: "plus.circle.fill")
-                                               .foregroundColor(Color(red: 0.36, green: 0.72, blue: 1.0))
+                                               .foregroundColor(sessionManager.isSessionActive ? .gray : Color(red: 0.36, green: 0.72, blue: 1.0))
                                                .font(.title2)
                                        }
+                                       .disabled(sessionManager.isSessionActive)
                                    }
                                }
                            }
@@ -230,19 +244,24 @@ struct HomeView: View {
                                    VStack(spacing: 0) {
                                        TextField("Search room...", text: $roomSearchText)
                                            .onChange(of: roomSearchText) { _ in
-                                               showRoomDropdown = !roomSearchText.isEmpty
+                                               if !sessionManager.isSessionActive {
+                                                   showRoomDropdown = !roomSearchText.isEmpty
+                                               }
                                            }
                                            .onTapGesture {
-                                               showRoomDropdown = true
+                                               if !sessionManager.isSessionActive {
+                                                   showRoomDropdown = true
+                                               }
                                            }
                                            .onSubmit {
                                                hideKeyboard()
                                            }
                                            .padding()
-                                           .background(Color.gray.opacity(0.1))
+                                           .background(Color.gray.opacity(sessionManager.isSessionActive ? 0.05 : 0.1))
                                            .cornerRadius(8)
+                                           .disabled(sessionManager.isSessionActive)
                                        
-                                       if showRoomDropdown && !filteredRooms.isEmpty {
+                                       if showRoomDropdown && !filteredRooms.isEmpty && !sessionManager.isSessionActive {
                                            ScrollView {
                                                LazyVStack(spacing: 0) {
                                                    ForEach(filteredRooms, id: \.self) { room in
@@ -287,33 +306,39 @@ struct HomeView: View {
                                    HStack(spacing: 12) {
                                        ForEach(sessionTypes, id: \.0) { type, label in
                                            Button(action: {
-                                               selectedType = type
+                                               if !sessionManager.isSessionActive {
+                                                   selectedType = type
+                                               }
                                            }) {
                                                Text(label)
                                                    .font(.caption)
                                                    .padding(.horizontal, 16)
                                                    .padding(.vertical, 8)
-                                                   .background(selectedType == type ? Color(red: 0.36, green: 0.72, blue: 1.0) : Color.gray.opacity(0.2))
-                                                   .foregroundColor(selectedType == type ? .white : .primary)
+                                                   .background(selectedType == type ? Color(red: 0.36, green: 0.72, blue: 1.0) : Color.gray.opacity(sessionManager.isSessionActive ? 0.1 : 0.2))
+                                                   .foregroundColor(selectedType == type ? .white : (sessionManager.isSessionActive ? .secondary : .primary))
                                                    .cornerRadius(20)
                                            }
                                            .buttonStyle(PlainButtonStyle())
+                                           .disabled(sessionManager.isSessionActive)
                                        }
                                    }
                                    
                                    HStack {
                                        Button(action: {
-                                           isExtraClass.toggle()
+                                           if !sessionManager.isSessionActive {
+                                               isExtraClass.toggle()
+                                           }
                                        }) {
                                            HStack {
                                                Image(systemName: isExtraClass ? "checkmark.square.fill" : "square")
                                                    .foregroundColor(isExtraClass ? Color(red: 0.36, green: 0.72, blue: 1.0) : .secondary)
                                                
                                                Text("Extra Class")
-                                                   .foregroundColor(.primary)
+                                                   .foregroundColor(sessionManager.isSessionActive ? .secondary : .primary)
                                            }
                                        }
                                        .buttonStyle(PlainButtonStyle())
+                                       .disabled(sessionManager.isSessionActive)
                                        
                                        Spacer()
                                    }
@@ -342,53 +367,51 @@ struct HomeView: View {
                                }
                                .disabled(!canActivateSession || isLoading)
                            } else {
-                               HStack(spacing: 12) {
-                                   Button(action: restartSession) {
-                                       HStack {
-                                           Image(systemName: "arrow.clockwise")
-                                           Text("Restart")
-                                               .fontWeight(.semibold)
-                                       }
-                                       .foregroundColor(.white)
-                                       .frame(maxWidth: .infinity)
-                                       .padding()
-                                       .background(Color.orange)
-                                       .cornerRadius(12)
+                               // Session active indicator
+                               VStack(spacing: 12) {
+                                   HStack {
+                                       Image(systemName: "checkmark.circle.fill")
+                                           .foregroundColor(.green)
+                                       Text("Session is active - will end automatically in \(timerManager.timeRemainingFormatted)")
+                                           .fontWeight(.medium)
+                                           .font(.caption)
+                                       Spacer()
                                    }
+                                   .padding()
+                                   .background(Color.green.opacity(0.1))
+                                   .cornerRadius(12)
                                    
-                                   Button(action: {
-                                       showEndSessionConfirm = true
-                                   }) {
-                                       HStack {
-                                           Image(systemName: "stop.circle.fill")
-                                           Text("End Session")
-                                               .fontWeight(.semibold)
-                                       }
-                                       .foregroundColor(.white)
-                                       .frame(maxWidth: .infinity)
-                                       .padding()
-                                       .background(Color.red)
-                                       .cornerRadius(12)
+                                   Button("View Attendance") {
+                                       showAttendance = true
                                    }
+                                   .foregroundColor(.white)
+                                   .frame(maxWidth: .infinity)
+                                   .padding()
+                                   .background(Color.blue)
+                                   .cornerRadius(12)
                                }
                            }
                        }
                        .padding(.horizontal, 20)
                    }
                }
+               
+               // Timer Dialog Overlay
+               if timerManager.showTimerDialog {
+                   SessionTimerDialog(
+                       timerManager: timerManager,
+                       onRestart: restartSession,
+                       onEnd: endSession,
+                       onDismiss: {
+                           timerManager.showTimerDialog = false
+                       }
+                   )
+               }
            }
            .navigationBarHidden(true)
        }
        .onAppear {
            loadRooms()
-       }
-       .confirmationDialog("End Session", isPresented: $showEndSessionConfirm) {
-           Button("End Session", role: .destructive) {
-               endSession()
-           }
-           Button("Cancel", role: .cancel) { }
-       } message: {
-           Text("Are you sure you want to end the session?")
        }
        .alert(alertMessage.contains("ended successfully") ? "Session Ended" : "Smart Attend", isPresented: $showAlert) {
            if alertMessage.contains("ended successfully") {
@@ -467,7 +490,16 @@ struct HomeView: View {
                isLoading = false
                if success {
                    sessionManager.startSession(sessionData)
-                   alertMessage = "Session activated successfully!"
+                   
+                   // Start the guaranteed timer with Firebase session end
+                   timerManager.startTimer {
+                       // This closure GUARANTEES Firebase update
+                       Task {
+                           await guaranteedSessionEnd(sessionData: sessionData)
+                       }
+                   }
+                   
+                   alertMessage = "Session activated successfully! Timer started for 5 minutes."
                } else {
                    alertMessage = "Failed to activate session. Please try again."
                }
@@ -477,25 +509,84 @@ struct HomeView: View {
    }
    
    private func restartSession() {
-       // For restart, we don't actually restart anything since session is already active
-       alertMessage = "Session is already active for the selected classes."
+       guard let currentSessionData = sessionManager.currentSessionData else { return }
+       
+       // Restart the timer with guaranteed Firebase update
+       timerManager.stopTimer()
+       timerManager.startTimer {
+           Task {
+               await guaranteedSessionEnd(sessionData: currentSessionData)
+           }
+       }
+       
+       alertMessage = "Session timer restarted for 5 minutes."
        showAlert = true
    }
    
    private func endSession() {
+       guard let currentSessionData = sessionManager.currentSessionData else { return }
+       
        Task {
-           let success = await sessionManager.manualEndSession()
+           await guaranteedSessionEnd(sessionData: currentSessionData)
+       }
+   }
+   
+   // GUARANTEED session end - this will ALWAYS update Firebase
+   private func guaranteedSessionEnd(sessionData: SessionData) async {
+       await endSessionWithGuarantee(sessionData)
+   }
+   
+   private func endSessionWithGuarantee(_ sessionData: SessionData) async {
+       print("🔥 GUARANTEED session end executing for: \(sessionData.sessionId)")
+       
+       // Multiple attempts to ensure Firebase update
+       var attempts = 0
+       var success = false
+       
+       while attempts < 3 && !success {
+           attempts += 1
+           print("🔄 Firebase update attempt \(attempts)/3")
            
-           await MainActor.run {
-               if success {
-                   resetForm()
-                   alertMessage = "Session ended successfully!"
-               } else {
-                   alertMessage = "Failed to end session. Please try again."
-               }
-               showAlert = true
+           success = await sessionManager.manualEndSession()
+           
+           if !success {
+               // Wait before retry
+               try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
            }
        }
+       
+       await MainActor.run {
+           // Stop timer regardless of Firebase result
+           timerManager.stopTimer()
+           resetForm()
+           
+           if success {
+               alertMessage = "Session ended successfully!"
+               print("✅ Firebase session end successful after \(attempts) attempts")
+           } else {
+               alertMessage = "Session timer ended but Firebase update failed after 3 attempts. Please check Firebase manually."
+               print("❌ Firebase session end failed after 3 attempts")
+           }
+           showAlert = true
+       }
+       
+       // Send local notification as backup
+       sendSessionEndNotification(success: success)
+   }
+   
+   private func sendSessionEndNotification(success: Bool) {
+       let content = UNMutableNotificationContent()
+       content.title = "Smart Attend - Session Ended"
+       content.body = success ?
+           "Your teaching session has ended and Firebase has been updated." :
+           "Your teaching session has ended but Firebase update failed. Please check manually."
+       content.sound = .default
+       content.badge = 1
+       
+       let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
+       let request = UNNotificationRequest(identifier: "session_end_result", content: content, trigger: trigger)
+       
+       UNUserNotificationCenter.current().add(request)
    }
    
    private func loadAvailableSubjects() {
@@ -567,7 +658,6 @@ struct HomeView: View {
        roomSearchText = ""
        selectedType = "lect"
        isExtraClass = false
-       // Don't reset sessionManager data here - it manages its own state
    }
    
    private func getCurrentDate() -> String {
@@ -577,7 +667,7 @@ struct HomeView: View {
    }
 }
 
-
+// MARK: - Supporting Views
 
 struct SessionCard<Content: View>: View {
    let title: String
@@ -842,4 +932,11 @@ struct ClassSelectionSheet: View {
            }
        }
    }
+}
+
+// MARK: - Extensions
+extension View {
+    func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
 }

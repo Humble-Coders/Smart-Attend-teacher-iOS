@@ -79,28 +79,6 @@ class SessionManager: ObservableObject {
         self.isSessionActive = true
     }
     
-    func endActiveSession() {
-        guard let sessionData = currentSessionData, isSessionActive else { return }
-        
-        print("📱 App minimized/closed - ending active session")
-        
-        Task {
-            let success = await firebaseManager.endSession(sessionData)
-            
-            await MainActor.run {
-                if success {
-                    print("✅ Session ended successfully due to app state change")
-                } else {
-                    print("❌ Failed to end session due to app state change")
-                }
-                
-                // Reset session state completely when app is closed
-                self.isSessionActive = false
-                self.currentSessionData = nil
-            }
-        }
-    }
-    
     func manualEndSession() async -> Bool {
         guard let sessionData = currentSessionData, isSessionActive else { return false }
         
